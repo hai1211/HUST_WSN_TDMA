@@ -1,0 +1,4 @@
+configuration TDMALinkC{
+}
+implementation{
+}
