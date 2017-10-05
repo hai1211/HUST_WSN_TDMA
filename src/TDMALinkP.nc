@@ -217,7 +217,7 @@ implementation{
 		return msg;
 	}
 
-	command error_t TDMAProtocol.sendData(){
+	command error_t TDMAProtocol.sendData(THL_msg_t *msg){
 		// TODO Auto-generated method stub
 		return SUCCESS;
 	}
