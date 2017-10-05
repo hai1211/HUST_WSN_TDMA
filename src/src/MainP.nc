@@ -1,5 +1,4 @@
 #include "messages.h"
-//#include <printf.h>
 module MainP{
 	uses {
 		
@@ -20,15 +19,14 @@ implementation{
 	
 
 	event void Boot.booted(){
-			call TDMAControl.start(0,0);
+		// TODO Auto-generated method stub
+		
 	}
 	event void Timer.fired(){
-		call Read.read();
+		// TODO Auto-generated method stub
 	}
 	event void TDMALinkSnd.sendDone(message_t *msg, error_t error){
-		if(error != SUCCESS){
-			//printf("Send fail..");
-		}
+		// TODO Auto-generated method stub
 	}
 
 	
@@ -39,28 +37,29 @@ implementation{
 			dataToSend.photo =  msg.photo;
 			dataToSend.temperature = msg.temperature;
 			dataToSend.vref=  msg.vref;
-			dataToSend.radiation = msg.radiation;
 	}
 }
 
 	event void TDMAControl.sendTime(){
+		// TODO Auto-generated method stub
+		 call Read.read();
 		if(dataToSend != NULL){
 			call TDMAControl.sendData(dataToSend);
 		}
 	}
 
 	event void TDMAControl.sendDone(error_t error){
+		// TODO Auto-generated method stub
 		if(error == SUCCESS ){	
 		}
 	}
 
 	event void TDMAControl.startDone(error_t err, bool is_head){
-		if(is_head = FALSE){
-			call Timer.startOneShot(20);
-		}
+		// TODO Auto-generated method stub
 	}
 
 	event message_t * TDMALinkRcv.receive(message_t *msg, void *payload, uint8_t len){
+		// TODO Auto-generated method stub
 		return msg;
 	}
 }
