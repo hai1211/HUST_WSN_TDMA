@@ -5,6 +5,11 @@
 #include "printf.h"
 #endif
 
+// 
+#define RESYNC_THRESHOLD 5
+// Minimum inactive slots to enter power saving
+#define SLEEP_SLOTS_THRESHOLD 1
+
 #ifndef SLOT_DURATION
 #define SLOT_DURATION	20 	// Millis
 #endif
@@ -46,7 +51,7 @@ module TDMALinkP{
 implementation{
 #pragma mark - Global var
 	am_addr_t head_addr = HEAD_ADDR;
-	bool sync_mode = TRUE;
+	bool sync_mode = FALSE;
 	bool is_started = FALSE;
 	bool sync_received = FALSE;
 	uint8_t assigned_slot;
@@ -55,6 +60,7 @@ implementation{
 	am_addr_t allocated_slots[MAX_SENSORS];
 	uint8_t next_free_slot_pos;
 	
+	bool data_ready = FALSE;
 	message_t sync_packet;
 	SyncMsg *sync_msg;
 	message_t join_req_packet;
@@ -102,7 +108,7 @@ implementation{
 		if(error != SUCCESS && error != EALREADY)
 			call RadioControl.stop();
 		#ifdef DEBUG
-		printf("[DEBUG] Radio Off");
+		printf("[DEBUG] Radio Off\n");
 		printfflush();
 		#endif
 		if (!is_started)
@@ -141,7 +147,7 @@ implementation{
 		//Turn radio on, if it's already on execute slot task immediately
 		if(call RadioControl.start() == EALREADY) {
 			#ifdef DEBUG
-			printf("[DEBUG] Radio already started!");
+			printf("[DEBUG] Radio already started!\n");
 			printfflush();
 			#endif
 			startSlotTask();
@@ -167,13 +173,102 @@ implementation{
 			signal TDMAProtocol.sendTime();
 	}
 	
-	event uint8_t SlotScheduler.slotEnded(uint8_t slotId) {
-		// TODO
-		return SUCCESS;
+	uint8_t getNextMasterSlot(uint8_t slot) {
+		//Listen for join requests
+		if(slot == SYNC_SLOT)
+			return JOIN_SLOT;
+
+		//Schedule for next allocated data slot
+		if(slot < next_free_slot_pos + 1)
+			return slot+1;
+
+		//No more allocated data slots to listen to, schedule for next epoch sync beaconing
+		return SYNC_SLOT;
+	}
+	
+	uint8_t getNextSlaveSlot(uint8_t slot) {
+		if(slot == SYNC_SLOT && sync_received == FALSE) {
+			missed_sync_count++;
+			#ifdef DEBUG
+			printf("[DEBUG] Missed synchronization beacon %d/%d\n", missed_sync_count, RESYNC_THRESHOLD);
+			printfflush();
+			#endif
+
+			//Go to resync mode
+			if(missed_sync_count >= RESYNC_THRESHOLD) {
+				sync_mode = TRUE;
+				return SYNC_SLOT;
+			}
+		}
+
+		//If node needs to join try to join in next slot
+		if(slot == SYNC_SLOT && has_joined == FALSE)
+			return JOIN_SLOT;
+
+		//If join failed, retry in the next epoch
+		if(slot == JOIN_SLOT && has_joined == FALSE) {
+			#ifdef DEBUG
+			printf("[DEBUG] Missing join answer\n");
+			printfflush();
+			#endif
+			return SYNC_SLOT;
+		}
+
+		//Reschedule for sync in next epoch
+		if(slot == assigned_slot)
+			return SYNC_SLOT;
+
+		//Transmit data (if any) in the assigned slot
+		if(data_ready == TRUE)
+			return assigned_slot;
+		else
+			return SYNC_SLOT;
+	}
+	
+	event uint8_t SlotScheduler.slotEnded(uint8_t slot) {
+		uint8_t nextSlot;
+		uint8_t inactivePeriod;
+		
+		#ifdef DEBUG
+		printf("[DEBUG] Slot %d ended\n", slot);
+		printfflush();
+		#endif
+
+		nextSlot = (TOS_NODE_ID == 0x0000) ? getNextMasterSlot(slot) : getNextSlaveSlot(slot);
+
+		//In sync mode the radio is always on and scheduler is not running
+		if(sync_mode) {
+			#ifdef DEBUG
+			printf("[DEBUG] Entering SYNC MODE\n");
+			printfflush();
+			#endif
+			call SlotScheduler.stop();
+			return SYNC_SLOT;
+		}
+
+		//Count inactive slots
+		if(slot < nextSlot) //next slot in same epoch
+			inactivePeriod = nextSlot - slot - 1;
+		else //next slot in next epoch
+			inactivePeriod = TOTAL_SLOTS - (slot - nextSlot) - 1;
+
+		//Special case with last slot immediately followed by first slot of next epoch
+		if(slot == LAST_SLOT && nextSlot == SYNC_SLOT)
+			inactivePeriod = 0;
+
+		//Radio is turned off only if the number of inactive slots between this and the next slot is >= of a threshold
+		if(inactivePeriod >= SLEEP_SLOTS_THRESHOLD) {
+			#ifdef DEBUG
+			printf("[DEBUG] Keeping radio off for the next %u inactive slots\n", inactivePeriod);
+			printfflush();
+			#endif
+			call RadioControl.stop();
+		}
+
+		return nextSlot;
 	}
 	
 	event void TSSend.sendDone(message_t *msg, error_t error){
-		// TODO Not run to here T_T
 		#ifdef DEBUG
 		printf("[DEBUG] Time sync packet sent!\n");
 		printfflush();
@@ -288,7 +383,6 @@ implementation{
 	}
 
 	event void JoinAnsSend.sendDone(message_t *msg, error_t error){
-		// TODO Auto-generated method stub
 		#ifdef DEBUG
 		if (error == SUCCESS) {
 			printf("[DEBUG] JoinAns sent!\n");
@@ -300,7 +394,6 @@ implementation{
 #pragma mark - Member	
 	// These are for member
 	event void JoinReqSend.sendDone(message_t *msg, error_t error){
-		// TODO Working on it :))))
 		#ifdef DEBUG
 		if (error == SUCCESS) {
 			printf("[DEBUG] JoinReq sent!\n");
@@ -329,7 +422,6 @@ implementation{
 		signal TDMAProtocol.startDone(SUCCESS, FALSE);
 
 		return msg;
-		return msg;
 	}
 
 	command error_t TDMAProtocol.sendData(THL_msg_t *msg){
@@ -343,7 +435,6 @@ implementation{
 	
 	void sendSyncBeacon() {
 		uint8_t status;
-		// TODO
 		sync_msg = (SyncMsg *) call TSSend.getPayload(&sync_packet, sizeof(SyncMsg));
 		status = call TSSend.send(AM_BROADCAST_ADDR, &sync_packet, sizeof(SyncMsg), call SlotScheduler.getSystemTime());
 		#ifdef DEBUG
@@ -351,7 +442,7 @@ implementation{
 //		printf("[DEBUG] SyncMsg size: %u\n", sizeof(SyncMsg));
 //		printf("[DEBUG] message_t size: %u\n", sizeof(message_t));
 //		printf("[DEBUG] SystemTime: %u\n", call SlotScheduler.getSystemTime());
-		printf("[DEBUG] Status: %u\n", status);
+//		printf("[DEBUG] Status: %u\n", status);
 		printfflush();
 		#endif
 	}

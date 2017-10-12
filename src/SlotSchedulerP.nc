@@ -22,8 +22,15 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 
 	command error_t SlotScheduler.start(uint32_t system_time, uint8_t firstSlot) {
 		if(isStarted == TRUE) {
+			#ifdef DEBUG
+			printf("[DEBUG] Slot Scheduler already started!\n");
+			printf("[DEBUG] Slot: %u", schedSlot);
+			printf("[DEBUG] Attempt Slot: %u", firstSlot);
+			printfflush();
+			#endif
 			return EALREADY;
-		} if(firstSlot > maxSlotId)
+		}
+		if(firstSlot > maxSlotId)
 			return FAIL;
 
 		isStarted = TRUE;
