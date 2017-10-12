@@ -4,14 +4,17 @@ module Run_20171P{
 		interface Leds;
 		interface Boot;
 		interface TDMALinkProtocol as TDMAControl;
-		interface ReadData as Read;		
+		interface ReadData as Read;
+		interface Timer<TMilli> as TimerDbg;		
 	}
 }
 implementation{
 	THL_msg_t dataToSend;
 
 	event void Boot.booted(){
+		call Leds.led0On();
 		call TDMAControl.start(0,0);
+		call TimerDbg.startPeriodic(2048);
 	}
 	
 	event void Read.readDone(error_t error,THL_msg_t msg){
@@ -35,5 +38,14 @@ implementation{
 
 	event void TDMAControl.stopDone(error_t err){
 		// TODO Future task
+	}
+
+	event void TimerDbg.fired(){
+		call Leds.led1Toggle();
+		#ifdef DEBUG
+		if(call TDMAControl.isRunning())
+			printf("Running\n");
+		printfflush();
+		#endif
 	}
 }

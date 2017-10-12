@@ -1,6 +1,10 @@
 #include <Timer.h>
 #include "messages.h"
 
+#ifdef DEBUG
+#include "printf.h"
+#endif
+
 #define HEAD_ADDR	0x0000
 #define SYNC_SLOT	0
 #define JOIN_SLOT	1
@@ -28,7 +32,6 @@ module TDMALinkP{
 }
 implementation{
 #pragma mark - Global var
-	bool running = FALSE;
 	am_addr_t head_addr = HEAD_ADDR;
 	bool sync_mode = TRUE;
 	bool is_started = FALSE;
@@ -67,6 +70,10 @@ implementation{
 				is_started = TRUE;
 				signal TDMAProtocol.startDone(SUCCESS, TRUE);
 		}
+	}
+	
+	command bool TDMAProtocol.isRunning() {
+		return is_started;
 	}
 	
 	command void TDMAProtocol.stop(){
@@ -150,11 +157,11 @@ implementation{
 	}
 	
 	event message_t * TSReceiver.receive(message_t *msg, void *payload, uint8_t len){
+		uint32_t ref_time;
 		#ifdef DEBUG
-		printf("[DEBUG] Time sync packet received")
+		printf("[DEBUG] Time sync packet received");
 		printfflush();
 		#endif
-		uint32_t ref_time;
 		if (len != sizeof(SyncMsg))
 			return msg;
 
@@ -241,4 +248,7 @@ implementation{
 		// TODO
 	}
 
+	command void TDMAProtocol.debug() {
+		// TODO
+	}
 }

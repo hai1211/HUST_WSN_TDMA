@@ -14,4 +14,8 @@ interface TDMALinkProtocol{
 
 #pragma mark - Get set other data
 	command uint8_t getCurrentSlot();
+	
+#pragma mark - Debug
+	command bool isRunning();
+	command void debug();
 }

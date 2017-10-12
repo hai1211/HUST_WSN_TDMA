@@ -1,4 +1,7 @@
 #include <Timer.h>
+#ifdef DEBUG
+#include "printf.h"
+#endif
 
 generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 	provides interface SlotScheduler;
@@ -63,8 +66,8 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 	}
 
 	event void SlotTimer.fired() {
-	uint8_t nextSlot;		
-	if(!isSlotActive) {
+		uint8_t nextSlot;		
+		if(!isSlotActive) {
 			isSlotActive = TRUE;
 			call SlotTimer.startOneShot(slotDuration);
 			signal SlotScheduler.slotStarted(schedSlot);
