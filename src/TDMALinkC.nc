@@ -43,5 +43,14 @@ implementation{
 	TDMALink.JoinAnsSend	->	JoinAnsSend.AMSend;
 
 	components new AMReceiverC(AM_JOINANSMSG) as JoinAnsRecv;
-	TDMALink.JoinAnsRecv	->	JoinAnsRecv.Receive;	
+	TDMALink.JoinAnsRecv	->	JoinAnsRecv.Receive;
+	
+	components LedsC;
+	TDMALink.Leds			->	LedsC.Leds;
+	
+	components new Timer32C() as Timer32khz;
+	TDMALink.JoinReqDelayTimer	-> Timer32khz;
+	
+	components RandomC as Rand;
+	TDMALink.JoinReqRandom	->	Rand.Random;	
 }
