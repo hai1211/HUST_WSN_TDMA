@@ -1,6 +1,7 @@
 #include "messages.h"
 #define LIGHT_SHOW
 #ifdef DEBUG
+
 #include "printf.h"
 #endif
 

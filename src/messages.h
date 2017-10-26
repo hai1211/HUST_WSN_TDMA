@@ -8,14 +8,13 @@ enum {
 	AM_DATAMSG = 133,
 	MAX_SENSORS = 5
 };
-typedef nx_struct THL_msg{
+typedef nx_struct {
 	nx_uint16_t vref;
 	nx_uint16_t temperature;
 	nx_uint16_t humidity;
 	nx_uint16_t photo;
 	nx_uint16_t radiation;
-	
-} THL_msg_t;
+} DataMsg;
 
 typedef nx_struct {
 } SyncMsg;

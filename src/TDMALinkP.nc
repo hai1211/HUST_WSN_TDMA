@@ -2,6 +2,9 @@
 #include "messages.h"
 
 #ifdef DEBUG
+#define DEBUG_NOW
+#define DEBUG_DATA
+#define DEBUG
 #include "printf.h"
 #endif
 
@@ -24,11 +27,15 @@
 #define LAST_SLOT (TOTAL_SLOTS-1)
 #define SLOTS_UNAVAILABLE 0
 
+// TODO Make a head head connection period in another module?
+
 module TDMALinkP{
 	provides interface TDMALinkProtocol as TDMAProtocol;
 	uses {
+		// Scheduler
 		interface SlotScheduler;
 		
+		// General radio
 		interface AMPacket;
 		interface SplitControl as RadioControl;
 		
@@ -40,12 +47,19 @@ module TDMALinkP{
 		// Send and receive Join Req
 		interface AMSend as JoinReqSend;
 		interface Receive as JoinReqRecv;
-		
 		interface AMSend as JoinAnsSend; 
 		interface Receive as JoinAnsRecv;
-		interface Leds;
+		
+		// Data send and recv
+		interface AMSend as DataSend;
+		interface Receive as DataRecv;
+		
+		// Random the send time to avoid collision
 		interface Random as JoinReqRandom;
 		interface Timer<T32khz> as JoinReqDelayTimer;
+		
+		// DEBUG
+		interface Leds;
 	}
 }
 implementation{
@@ -54,31 +68,34 @@ implementation{
 	bool sync_mode = FALSE;
 	bool is_started = FALSE;
 	bool sync_received = FALSE;
-	uint8_t assigned_slot;
+	uint8_t assigned_slot = 0;
 	bool has_joined = FALSE;
 	uint8_t missed_sync_count = 0;
-	am_addr_t allocated_slots[MAX_SENSORS];
-	uint8_t next_free_slot_pos;
-	
+	am_addr_t allocated_slots[MAX_SENSORS] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
+	uint8_t next_free_slot_pos = 0;
 	bool data_ready = FALSE;
+	
 	message_t sync_packet;
 	SyncMsg *sync_msg;
 	message_t join_req_packet;
 	JoinReqMsg *join_req_msg;
 	message_t join_ans_packet;
 	JoinAnsMsg *join_ans_msg;
+	message_t data_packet;
+	DataMsg *data_msg;
 	
 #pragma mark - Define all functions here
 	void sendSyncBeacon();
 	void startSlotTask();
 	void sendJoinRequest();
-	
+	error_t sendData(DataMsg *msg);
+	void startPrepareData(uint8_t slot_id);
 #pragma mark - All
 	event void RadioControl.startDone(error_t error){
 		if(error != SUCCESS && error != EALREADY)
 			call RadioControl.start();
 //		call Leds.led2Toggle();
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Radio On\n");
 		printfflush();
 		#endif
@@ -107,7 +124,9 @@ implementation{
 	event void RadioControl.stopDone(error_t error){
 		if(error != SUCCESS && error != EALREADY)
 			call RadioControl.stop();
-		#ifdef DEBUG
+//		if(error == SUCCESS || error == EALREADY)
+//			call Leds.led2Off();
+		#ifdef DEBUG_1
 		printf("[DEBUG] Radio Off\n");
 		printfflush();
 		#endif
@@ -116,16 +135,17 @@ implementation{
 	}
 	
 	command error_t TDMAProtocol.start(uint32_t system_time, uint8_t slot_id) {
+		data_msg = (DataMsg *) call DataSend.getPayload(&data_packet, sizeof(DataMsg));
 		if(TOS_NODE_ID == 0x0000) {
 			join_ans_msg = (JoinAnsMsg*) call JoinAnsSend.getPayload(&join_ans_packet, sizeof(JoinAnsMsg));
 			call SlotScheduler.start(0, SYNC_SLOT);
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Master node %u started [SLAVE SLOTS:%u | SLOT DURATION:%ums | EPOCH DURATION:%ums]\n", TOS_NODE_ID, MAX_SLAVES, SLOT_DURATION, (MAX_SLAVES + 2) * SLOT_DURATION);
 			printfflush();
 			#endif
 		} else {
 			join_req_msg = (JoinReqMsg*) call JoinReqSend.getPayload(&join_req_packet, sizeof(JoinReqMsg));
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Slave node %u started\n", TOS_NODE_ID);
 			printf("[DEBUG] Entering SYNC MODE\n");
 			printfflush();
@@ -138,15 +158,15 @@ implementation{
 	
 #pragma mark - Head
 	// These are for head
-	event void SlotScheduler.slotStarted(uint8_t slot_id) {
-		#ifdef DEBUG
+	event void SlotScheduler.transmittingSlotStarted(uint8_t slot_id) {
+		#ifdef DEBUG_1
 		printf("[DEBUG] Slot scheduler started with slot no: %d\n", slot_id);
 		printfflush();
 		#endif
 
 		//Turn radio on, if it's already on execute slot task immediately
 		if(call RadioControl.start() == EALREADY) {
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Radio already started!\n");
 			printfflush();
 			#endif
@@ -158,6 +178,11 @@ implementation{
 		//At this point it is guaranteed that the radio is already on
 
 		uint8_t slot = call SlotScheduler.getScheduledSlot();
+		#ifdef DEBUG_NOW
+		printf("[DEBUG] Current Slot: %u\n", slot);
+		printfflush();
+		#endif
+		// This is for head
 		if(head_addr == TOS_NODE_ID) {
 			if(slot == SYNC_SLOT) {
 				sendSyncBeacon();
@@ -165,12 +190,14 @@ implementation{
 			return;
 		}
 
+		// Other sensors
+		// TODO Need adding delay time for send step
 		if(slot == SYNC_SLOT)
 			sync_received = FALSE;
 		else if (slot == JOIN_SLOT)
 			sendJoinRequest();
 		else
-			signal TDMAProtocol.sendTime();
+			sendData(data_msg);
 	}
 	
 	uint8_t getNextMasterSlot(uint8_t slot) {
@@ -189,7 +216,7 @@ implementation{
 	uint8_t getNextSlaveSlot(uint8_t slot) {
 		if(slot == SYNC_SLOT && sync_received == FALSE) {
 			missed_sync_count++;
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Missed synchronization beacon %d/%d\n", missed_sync_count, RESYNC_THRESHOLD);
 			printfflush();
 			#endif
@@ -207,7 +234,7 @@ implementation{
 
 		//If join failed, retry in the next epoch
 		if(slot == JOIN_SLOT && has_joined == FALSE) {
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Missing join answer\n");
 			printfflush();
 			#endif
@@ -215,30 +242,41 @@ implementation{
 		}
 
 		//Reschedule for sync in next epoch
-		if(slot == assigned_slot)
+		if(slot == assigned_slot) {
 			return SYNC_SLOT;
+		}
 
 		//Transmit data (if any) in the assigned slot
-		if(data_ready == TRUE)
+		if(data_ready == TRUE) {
+			#ifdef DEBUG_NOW
+			printf("[DEBUG] Data ready...\n");
+			printfflush();
+			#endif
 			return assigned_slot;
-		else
+		} else {
+			// Bug is here
+			#ifdef DEBUG_NOW
+			printf("[DEBUG] Data not ready\n");
+			printfflush();
+			#endif
 			return SYNC_SLOT;
+		}
 	}
 	
-	event uint8_t SlotScheduler.slotEnded(uint8_t slot) {
+	event uint8_t SlotScheduler.transmittingSlotEnded(uint8_t slot) {
 		uint8_t nextSlot;
 		uint8_t inactivePeriod;
 		
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Slot %d ended\n", slot);
 		printfflush();
 		#endif
 
 		nextSlot = (TOS_NODE_ID == 0x0000) ? getNextMasterSlot(slot) : getNextSlaveSlot(slot);
-
+		
 		//In sync mode the radio is always on and scheduler is not running
 		if(sync_mode) {
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Entering SYNC MODE\n");
 			printfflush();
 			#endif
@@ -258,18 +296,20 @@ implementation{
 
 		//Radio is turned off only if the number of inactive slots between this and the next slot is >= of a threshold
 		if(inactivePeriod >= SLEEP_SLOTS_THRESHOLD) {
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Keeping radio off for the next %u inactive slots\n", inactivePeriod);
 			printfflush();
 			#endif
 			call RadioControl.stop();
+//			if(err == SUCCESS)
+//				call Leds.led2On();
 		}
 
 		return nextSlot;
 	}
 	
 	event void TSSend.sendDone(message_t *msg, error_t error){
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Time sync packet sent!\n");
 		printfflush();
 		#endif
@@ -277,7 +317,7 @@ implementation{
 	
 	event message_t * TSReceiver.receive(message_t *msg, void *payload, uint8_t len){
 		uint32_t ref_time;
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Time sync packet received\n");
 		printfflush();
 		#endif
@@ -295,23 +335,23 @@ implementation{
 
 		if(sync_mode) {
 			//If sync mode was active switch to slotted mode
-			sync_mode = FALSE;		
+			sync_mode = FALSE;
 			if(has_joined) {
 				//Already joined, just desynchronized
-				#ifdef DEBUG
+				#ifdef DEBUG_1
 				printf("[DEBUG] Joined, start with assigned_slot: %u\n", assigned_slot);
 				printfflush();
 				#endif
 				call SlotScheduler.start(ref_time, assigned_slot);
 			} else {
 				//Join phase never completed
-				#ifdef DEBUG
+				#ifdef DEBUG_1
 				printf("[DEBUG] Join phase start here!\n");
 				printfflush();
 				#endif
 				call SlotScheduler.start(ref_time, JOIN_SLOT);
 			}
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Local scheduler started and synchronized with master scheduler\n");
 			printf("[DEBUG] Entering SLOTTED MODE\n");	
 			printfflush();
@@ -319,7 +359,7 @@ implementation{
 		} else {
 			//Synchronize the running scheduler
 			call SlotScheduler.syncSystemTime(ref_time);
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Local scheduler synchronized with master scheduler\n");
 			printfflush();
 			#endif
@@ -348,7 +388,7 @@ implementation{
 	
 	void sendJoinAnswer(am_addr_t slave, uint8_t slot) {
 		join_ans_msg->slot = slot;
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Sending join answer to 0x%04x\n", slave);
 		printfflush();
 		#endif
@@ -362,7 +402,7 @@ implementation{
 			return msg;
 
 		slave = call AMPacket.source(msg);
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Received join request from 0x%04x\n", slave);
 		printfflush();
 		#endif
@@ -373,7 +413,7 @@ implementation{
 		if(alloc_slot != SLOTS_UNAVAILABLE)
 			sendJoinAnswer(slave, alloc_slot);
 		else {
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("WARNING: No slots available for slave 0x%04x\n", slave);
 			printfflush();
 			#endif
@@ -383,7 +423,7 @@ implementation{
 	}
 
 	event void JoinAnsSend.sendDone(message_t *msg, error_t error){
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		if (error == SUCCESS) {
 			printf("[DEBUG] JoinAns sent!\n");
 			printfflush();
@@ -394,7 +434,7 @@ implementation{
 #pragma mark - Member	
 	// These are for member
 	event void JoinReqSend.sendDone(message_t *msg, error_t error){
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		if (error == SUCCESS) {
 			printf("[DEBUG] JoinReq sent!\n");
 			printfflush();
@@ -410,10 +450,12 @@ implementation{
 
 		assigned_slot = join_ans_msg->slot;
 
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Join completed to slot %u\n", assigned_slot);
 		printfflush();
 		#endif
+		
+		startPrepareData(assigned_slot - 2);
 		
 		has_joined = TRUE;
 
@@ -424,9 +466,17 @@ implementation{
 		return msg;
 	}
 
-	command error_t TDMAProtocol.sendData(THL_msg_t *msg){
-		// TODO Auto-generated method stub
-		return SUCCESS;
+	error_t sendData(DataMsg *msg){
+		data_ready = TRUE;
+		#ifdef DEBUG_1
+		printf("[DEBUG] Sending data!!!!!\n");
+		printfflush();
+		#endif
+		
+		if(call DataSend.send(head_addr, &data_packet, sizeof(DataMsg)) == SUCCESS)
+			return SUCCESS;
+		else
+			return FAIL;
 	}
 
 	command uint8_t TDMAProtocol.getCurrentSlot(){
@@ -437,7 +487,7 @@ implementation{
 		uint8_t status;
 		sync_msg = (SyncMsg *) call TSSend.getPayload(&sync_packet, sizeof(SyncMsg));
 		status = call TSSend.send(AM_BROADCAST_ADDR, &sync_packet, sizeof(SyncMsg), call SlotScheduler.getSystemTime());
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Sending synchronization beacon\n");
 //		printf("[DEBUG] SyncMsg size: %u\n", sizeof(SyncMsg));
 //		printf("[DEBUG] message_t size: %u\n", sizeof(message_t));
@@ -455,7 +505,7 @@ implementation{
 	
 	event void JoinReqDelayTimer.fired(){
 		// Delay done, sending data
-		#ifdef DEBUG
+		#ifdef DEBUG_1
 		printf("[DEBUG] Sending join request to master 0x%04x\n", head_addr);
 		printfflush();
 		#endif
@@ -463,7 +513,82 @@ implementation{
 	}
 
 	command void TDMAProtocol.debug() {
-		// TODO
+		// TODO make debug return more specific data
+		#ifdef DEBUG_DEBUG
+		printf("[DEBUG] Scheduled Slot: %u\n", call SlotScheduler.getScheduledSlot());
+		printf("[DEBUG] Real Scheduled Slot: %u\n", assigned_slot);
+		printfflush();
+		#endif
 	}
 
+	event void SlotScheduler.preparingSlotStarted(uint8_t slotId){
+		signal TDMAProtocol.preparePacket();
+	}
+
+	event void SlotScheduler.preparingSlotEnded(uint8_t slotId){
+		// TODO Stop the sensor from reading
+	}
+
+	event void DataSend.sendDone(message_t *msg, error_t error){
+		#ifdef DEBUG_DATA
+		printf("[DEBUG] Data sent!\n");
+		printfflush();
+		#endif
+		#ifdef DEBUG_DATA
+		printf("=====================\n");
+		printf("[DATA] Source: 0x%04x\n", call AMPacket.source(msg));
+		printf("[DATA] Destination: 0x%04x\n", call AMPacket.destination(msg));
+		printf("[DATA] msg->vref: 0x%04x\n", data_msg->vref);
+		printf("[DATA] msg->temp: 0x%04x\n", data_msg->temperature);
+		printf("[DATA] msg->humi: 0x%04x\n", data_msg->humidity);
+		printf("[DATA] msg->phot: 0x%04x\n", data_msg->photo);
+		printf("[DATA] msg->radi: 0x%04x\n", data_msg->radiation);
+		printf("=====================\n");
+		printfflush();
+		#endif
+		data_ready = FALSE;
+	}
+
+	event message_t * DataRecv.receive(message_t *msg, void *payload, uint8_t len){
+		#ifdef DEBUG_1
+		printf("[DEBUG] Data received!\n");
+		printfflush();
+		#endif
+		
+		data_msg = (DataMsg *) payload;
+		// DEBUG data received
+		#ifdef DEBUG_DATA
+		printf("=====================\n");
+		printf("[DATA] Source: 0x%04x\n", call AMPacket.source(msg));
+		printf("[DATA] Destination: 0x%04x\n", call AMPacket.destination(msg));
+		printf("[DATA] msg->vref: 0x%04x\n", data_msg->vref);
+		printf("[DATA] msg->temp: 0x%04x\n", data_msg->temperature);
+		printf("[DATA] msg->humi: 0x%04x\n", data_msg->humidity);
+		printf("[DATA] msg->phot: 0x%04x\n", data_msg->photo);
+		printf("[DATA] msg->radi: 0x%04x\n", data_msg->radiation);
+		printf("=====================\n");
+		printfflush();
+		#endif
+		
+		return msg;
+	}
+
+	command error_t TDMAProtocol.dataIsReady(DataMsg *msg){
+		if(data_ready)
+			return EALREADY;
+		data_ready = TRUE;
+		// Setting up data for data packet
+		data_msg = (DataMsg *) call DataSend.getPayload(&data_packet, sizeof(DataMsg));
+		data_msg->vref = msg->vref;
+		data_msg->temperature = msg->temperature;
+		data_msg->humidity = msg->humidity;
+		data_msg->photo = msg->photo;
+		data_msg->radiation = msg->radiation;
+		
+		return SUCCESS;
+	}
+	
+	void startPrepareData(uint8_t slot_id) {
+		call SlotScheduler.startPreparingSlot(slot_id);
+	}
 }

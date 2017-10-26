@@ -9,7 +9,7 @@ module Run_20171P{
 	}
 }
 implementation{
-	THL_msg_t dataToSend;
+	DataMsg *dataToSend;
 
 	event void Boot.booted(){
 		call Leds.led0On();
@@ -17,23 +17,24 @@ implementation{
 		call TimerDbg.startPeriodic(2048);
 	}
 	
-	event void Read.readDone(error_t error,THL_msg_t msg){
+	event void Read.readDone(error_t error, DataMsg *msg){
 		if(error == SUCCESS){
 			dataToSend = msg;
-			call TDMAControl.sendData(&dataToSend);
+			call TDMAControl.dataIsReady(msg);
 		}
-	}
-
-	event void TDMAControl.sendTime(){
-		call Read.read();
 	}
 
 	event void TDMAControl.sendDone(error_t error){
 		// TODO Future task
+		#ifdef DEBUG_1
+		printf("[DEBUG] TDMA Data Send Done!\n");
+		printfflush();
+		#endif
 	}
 
 	event void TDMAControl.startDone(error_t err, bool is_head){
 		// TODO Future task
+		call TDMAControl.debug();
 	}
 
 	event void TDMAControl.stopDone(error_t err){
@@ -42,10 +43,15 @@ implementation{
 
 	event void TimerDbg.fired(){
 		call Leds.led1Toggle();
-		#ifdef DEBUG1
+		#ifdef DEBUG_1
 		if(call TDMAControl.isRunning())
 			printf("Running\n");
 		printfflush();
 		#endif
+	}
+
+	event void TDMAControl.preparePacket(){
+		// TODO Auto-generated method stub
+		call Read.read();
 	}
 }

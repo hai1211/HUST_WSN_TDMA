@@ -8,7 +8,8 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 
 	uses {
 		interface Timer<T32khz> as EpochTimer;
-		interface Timer<T32khz> as SlotTimer;
+		interface Timer<T32khz> as TransmitSlotTimer;
+		interface Timer<T32khz> as PrepareSlotTimer;
 	}
 } implementation {
 
@@ -16,28 +17,37 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 	uint32_t epochDuration = slotDuration * ((uint16_t) maxSlotId + 1);
 
 	bool isStarted = FALSE;
-	bool isSlotActive = FALSE;
+	bool isTransmitSlotActive = FALSE;
+	bool isPrepareSlotActive = FALSE;
 	uint32_t epoch_reference_time;
-	uint8_t schedSlot;
+	uint8_t transmitSlot = 0;
+	uint8_t prepareSlot = 0;
 
 	command error_t SlotScheduler.start(uint32_t system_time, uint8_t firstSlot) {
 		if(isStarted == TRUE) {
-			#ifdef DEBUG
+			#ifdef DEBUG_1
 			printf("[DEBUG] Slot Scheduler already started!\n");
-			printf("[DEBUG] Slot: %u", schedSlot);
-			printf("[DEBUG] Attempt Slot: %u", firstSlot);
+			printf("[DEBUG] Slot: %u\n", transmitSlot);
+			printf("[DEBUG] Attempt Slot: %u\n", firstSlot);
 			printfflush();
 			#endif
 			return EALREADY;
+		} else {
+			#ifdef DEBUG_1
+			printf("[DEBUG] Slot Scheduler start first time!\n");
+			printf("[DEBUG] Slot: %u\n", transmitSlot);
+			printf("[DEBUG] Attempt Slot: %u\n", firstSlot);
+			printfflush();
+			#endif
 		}
 		if(firstSlot > maxSlotId)
 			return FAIL;
 
 		isStarted = TRUE;
-		schedSlot = firstSlot;
+		transmitSlot = firstSlot;
 		epoch_reference_time = system_time;
 
-		call SlotTimer.startOneShotAt(system_time, slotDuration * firstSlot);
+		call TransmitSlotTimer.startOneShotAt(system_time, slotDuration * firstSlot);
 		call EpochTimer.startPeriodicAt(system_time, epochDuration);
 
 		return SUCCESS;
@@ -49,7 +59,8 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 
 	command error_t SlotScheduler.stop() {
 		bool wasStarted = isStarted;
-		call SlotTimer.stop();
+		call TransmitSlotTimer.stop();
+		call PrepareSlotTimer.stop();
 		call EpochTimer.stop();
 		isStarted = FALSE;
 		return (wasStarted) ? EALREADY : SUCCESS;
@@ -65,38 +76,64 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 	}
 
 	command uint8_t SlotScheduler.getScheduledSlot() {
-		return schedSlot;
+		return transmitSlot;
 	}
 
 	event void EpochTimer.fired() {
 		epoch_reference_time += epochDuration;
 	}
 
-	event void SlotTimer.fired() {
+	event void TransmitSlotTimer.fired() {
 		uint8_t nextSlot;		
-		if(!isSlotActive) {
-			isSlotActive = TRUE;
-			call SlotTimer.startOneShot(slotDuration);
-			signal SlotScheduler.slotStarted(schedSlot);
+		if(!isTransmitSlotActive) {
+			isTransmitSlotActive = TRUE;
+			call TransmitSlotTimer.startOneShot(slotDuration);
+			signal SlotScheduler.transmittingSlotStarted(transmitSlot);
 			return;
 		}
 
-		isSlotActive = FALSE;
+		isTransmitSlotActive = FALSE;
 
-		nextSlot = signal SlotScheduler.slotEnded(schedSlot);
+		nextSlot = signal SlotScheduler.transmittingSlotEnded(transmitSlot);
 	
 		//If scheduler is not running don't schedule other slots
 		if(!isStarted)
 			return;
 
 		//Next slot in the same epoch or current and next slot are one just after the other between current and next epoch
-		if (nextSlot > schedSlot || (schedSlot == maxSlotId && nextSlot == 0)) {
-			schedSlot = nextSlot;
-			call SlotTimer.startOneShotAt(epoch_reference_time, slotDuration * schedSlot);
+		if (nextSlot > transmitSlot || (transmitSlot == maxSlotId && nextSlot == 0)) {
+			transmitSlot = nextSlot;
+			call TransmitSlotTimer.startOneShotAt(epoch_reference_time, slotDuration * transmitSlot);
 		} else {
 			//Next slot is in next epoch
-			schedSlot = nextSlot;
-			call SlotTimer.startOneShotAt(epoch_reference_time + epochDuration, slotDuration * schedSlot);
+			transmitSlot = nextSlot;
+			call TransmitSlotTimer.startOneShotAt(epoch_reference_time + epochDuration, slotDuration * transmitSlot);
 		}
+	}
+
+
+	event void PrepareSlotTimer.fired(){
+		if(!isPrepareSlotActive) {
+			isPrepareSlotActive = TRUE;
+			#ifdef DEBUG_NOW
+			printf("[DEBUG] Prepare slot timer activated...\n");
+			printfflush();
+			#endif
+			call PrepareSlotTimer.startOneShot(slotDuration);
+			signal SlotScheduler.preparingSlotStarted(transmitSlot);
+			return;
+		}
+
+		isPrepareSlotActive = FALSE;
+
+		signal SlotScheduler.preparingSlotEnded(prepareSlot);
+		
+		// Absolutely next epoch! Data timer only trigger once per round		
+		call PrepareSlotTimer.startOneShotAt(epoch_reference_time + epochDuration, slotDuration * prepareSlot);
+	}
+
+	command void SlotScheduler.startPreparingSlot(uint8_t slotId){
+		prepareSlot = slotId;
+		call PrepareSlotTimer.startOneShotAt(epoch_reference_time, slotDuration * prepareSlot);
 	}
 }

@@ -11,13 +11,13 @@ module ReadDataP{
 		}
 }
 implementation{
-	THL_msg_t data;
+	DataMsg data;
 	uint8_t numsensors = 0;
 
 	event void Humidity.readDone(error_t result, uint16_t val){
 		data.humidity = val;
 		if (++numsensors == MAX_SENSORS){
-			signal ReadData.readDone(SUCCESS, data);
+			signal ReadData.readDone(SUCCESS, &data);
 			numsensors = 0;
 		call Leds.led1On();
 		}
@@ -28,7 +28,7 @@ implementation{
 		data.temperature = val;
 		if(++numsensors == MAX_SENSORS){
 			call Leds.led1On();
-			signal ReadData.readDone(SUCCESS, data);
+			signal ReadData.readDone(SUCCESS, &data);
 			numsensors = 0;
 		}
 	}
@@ -37,7 +37,7 @@ implementation{
 		data.vref = val;
 		if(++numsensors ==  MAX_SENSORS){
 			call Leds.led1On();
-			signal ReadData.readDone(SUCCESS, data);
+			signal ReadData.readDone(SUCCESS, &data);
 			numsensors = 0;
 		}
 	}
@@ -46,7 +46,7 @@ implementation{
 		data.photo = val;
 		if(++numsensors == MAX_SENSORS){
 			call Leds.led1On();
-			signal ReadData.readDone(SUCCESS, data);
+			signal ReadData.readDone(SUCCESS, &data);
 			numsensors = 0;
 		}
 	}
@@ -55,7 +55,7 @@ implementation{
 		data.radiation = val;
 		if(++numsensors == MAX_SENSORS){
 			call Leds.led1On();
-			signal ReadData.readDone(SUCCESS, data);
+			signal ReadData.readDone(SUCCESS, &data);
 			numsensors = 0;
 		}
 	}	

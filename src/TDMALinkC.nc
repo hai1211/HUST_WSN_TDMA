@@ -33,17 +33,23 @@ implementation{
 	TDMALink.TSPacket		->	TimeSync.TimeSyncPacket32khz;
 	TDMALink.TSReceiver		->	TimeSync.Receive[AM_SYNCMSG];
 	
+	// Join Req
 	components new AMSenderC(AM_JOINREQMSG) as JoinReqSend;
 	TDMALink.JoinReqSend	->	JoinReqSend.AMSend;
-
 	components new AMReceiverC(AM_JOINREQMSG) as JoinReqRecv;
 	TDMALink.JoinReqRecv	->	JoinReqRecv.Receive;
 	
+	// Join ans
 	components new AMSenderC(AM_JOINANSMSG) as JoinAnsSend;
 	TDMALink.JoinAnsSend	->	JoinAnsSend.AMSend;
-
 	components new AMReceiverC(AM_JOINANSMSG) as JoinAnsRecv;
 	TDMALink.JoinAnsRecv	->	JoinAnsRecv.Receive;
+	
+	// Data transmission
+	components new AMSenderC(AM_DATAMSG) as DataSend;
+	TDMALink.DataSend		-> DataSend.AMSend;
+	components new AMReceiverC(AM_DATAMSG) as DataRecv;
+	TDMALink.DataRecv		-> DataRecv.Receive;
 	
 	components LedsC;
 	TDMALink.Leds			->	LedsC.Leds;
