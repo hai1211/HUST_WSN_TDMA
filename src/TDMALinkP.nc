@@ -2,9 +2,6 @@
 #include "messages.h"
 
 #ifdef DEBUG
-#define DEBUG_NOW
-#define DEBUG_DATA
-#define DEBUG
 #include "printf.h"
 #endif
 
@@ -63,6 +60,12 @@ module TDMALinkP{
 	}
 }
 implementation{
+#ifdef DEBUG
+#define DEBUG_NOW
+// #define DEBUG_DATA
+// #define DEBUG_DEBUG
+// #define DEBUG_1
+#endif
 #pragma mark - Global var
 	am_addr_t head_addr = HEAD_ADDR;
 	bool sync_mode = FALSE;
@@ -71,7 +74,7 @@ implementation{
 	uint8_t assigned_slot = 0;
 	bool has_joined = FALSE;
 	uint8_t missed_sync_count = 0;
-	am_addr_t allocated_slots[MAX_SENSORS] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
+	am_addr_t allocated_slots[MAX_SENSORS];
 	uint8_t next_free_slot_pos = 0;
 	bool data_ready = FALSE;
 	
@@ -89,7 +92,6 @@ implementation{
 	void startSlotTask();
 	void sendJoinRequest();
 	error_t sendData(DataMsg *msg);
-	void startPrepareData(uint8_t slot_id);
 #pragma mark - All
 	event void RadioControl.startDone(error_t error){
 		if(error != SUCCESS && error != EALREADY)
@@ -176,9 +178,15 @@ implementation{
 	
 	void startSlotTask() {
 		//At this point it is guaranteed that the radio is already on
-
 		uint8_t slot = call SlotScheduler.getScheduledSlot();
-		#ifdef DEBUG_NOW
+		if(slot == 0) {
+		#ifdef DEBUG
+			printf("/*------ NEW ROUND ------*/\n");
+			printfflush();
+		#endif
+			signal TDMAProtocol.preparePacket();
+		}
+		#ifdef DEBUG_1
 		printf("[DEBUG] Current Slot: %u\n", slot);
 		printfflush();
 		#endif
@@ -248,14 +256,14 @@ implementation{
 
 		//Transmit data (if any) in the assigned slot
 		if(data_ready == TRUE) {
-			#ifdef DEBUG_NOW
+			#ifdef DEBUG_1
 			printf("[DEBUG] Data ready...\n");
 			printfflush();
 			#endif
 			return assigned_slot;
 		} else {
 			// Bug is here
-			#ifdef DEBUG_NOW
+			#ifdef DEBUG_1
 			printf("[DEBUG] Data not ready\n");
 			printfflush();
 			#endif
@@ -309,6 +317,7 @@ implementation{
 	}
 	
 	event void TSSend.sendDone(message_t *msg, error_t error){
+		call TDMAProtocol.debug();
 		#ifdef DEBUG_1
 		printf("[DEBUG] Time sync packet sent!\n");
 		printfflush();
@@ -389,7 +398,8 @@ implementation{
 	void sendJoinAnswer(am_addr_t slave, uint8_t slot) {
 		join_ans_msg->slot = slot;
 		#ifdef DEBUG_1
-		printf("[DEBUG] Sending join answer to 0x%04x\n", slave);
+		printf("[DEBUG] Slave 0x%04x: %d\n", slave, slot);
+//		printf("[DEBUG] Sending join answer to 0x%04x\n", slave);
 		printfflush();
 		#endif
 		call JoinAnsSend.send(slave, &join_ans_packet, sizeof(JoinAnsMsg));
@@ -455,8 +465,6 @@ implementation{
 		printfflush();
 		#endif
 		
-		startPrepareData(assigned_slot - 2);
-		
 		has_joined = TRUE;
 
 		//FOR CONTROL INTERFACE: Signal that slave is ready
@@ -469,7 +477,7 @@ implementation{
 	error_t sendData(DataMsg *msg){
 		data_ready = TRUE;
 		#ifdef DEBUG_1
-		printf("[DEBUG] Sending data!!!!!\n");
+		printf("[DEBUG] Sending data at slot %d\n", call SlotScheduler.getScheduledSlot());
 		printfflush();
 		#endif
 		
@@ -514,19 +522,19 @@ implementation{
 
 	command void TDMAProtocol.debug() {
 		// TODO make debug return more specific data
+		int i = 0;
 		#ifdef DEBUG_DEBUG
-		printf("[DEBUG] Scheduled Slot: %u\n", call SlotScheduler.getScheduledSlot());
-		printf("[DEBUG] Real Scheduled Slot: %u\n", assigned_slot);
+		printf("[INFO] Assigned Slot: %d\n", assigned_slot);
+		if(TOS_NODE_ID == 0x0000) {
+			printf("========================\n");
+			printf("[INFO] Slots table:\n");
+			for(i = 0; i < MAX_SENSORS; i++) {
+				printf("[INFO] Slot %d: 0x%04x\n", i, allocated_slots[i]);
+			}
+			printf("========================\n");
+		}
 		printfflush();
 		#endif
-	}
-
-	event void SlotScheduler.preparingSlotStarted(uint8_t slotId){
-		signal TDMAProtocol.preparePacket();
-	}
-
-	event void SlotScheduler.preparingSlotEnded(uint8_t slotId){
-		// TODO Stop the sensor from reading
 	}
 
 	event void DataSend.sendDone(message_t *msg, error_t error){
@@ -556,7 +564,11 @@ implementation{
 		#endif
 		
 		data_msg = (DataMsg *) payload;
-		// DEBUG data received
+		// TODO DEBUG data received
+		#ifdef DEBUG_NOW
+		printf("[DATA] Receive data from 0x%04x\n", call AMPacket.source(msg));
+		printfflush();
+		#endif
 		#ifdef DEBUG_DATA
 		printf("=====================\n");
 		printf("[DATA] Source: 0x%04x\n", call AMPacket.source(msg));
@@ -587,8 +599,5 @@ implementation{
 		
 		return SUCCESS;
 	}
-	
-	void startPrepareData(uint8_t slot_id) {
-		call SlotScheduler.startPreparingSlot(slot_id);
-	}
+
 }

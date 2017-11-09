@@ -9,7 +9,6 @@ generic configuration SlotSchedulerC(uint32_t slotDuration, uint8_t maxSlotId) {
 
 	SlotSchedulerP.EpochTimer 			-> EpochTimer;
 	SlotSchedulerP.TransmitSlotTimer 	-> TransmitSlotTimer;
-	SlotSchedulerP.PrepareSlotTimer		-> PrepareSlotTimer;
 	
 	SlotScheduler = SlotSchedulerP;
 }

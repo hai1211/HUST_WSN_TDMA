@@ -43,6 +43,7 @@ implementation{
 
 	event void TimerDbg.fired(){
 		call Leds.led1Toggle();
+//		call TDMAControl.debug();
 		#ifdef DEBUG_1
 		if(call TDMAControl.isRunning())
 			printf("Running\n");

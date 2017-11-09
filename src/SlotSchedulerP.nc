@@ -9,9 +9,11 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 	uses {
 		interface Timer<T32khz> as EpochTimer;
 		interface Timer<T32khz> as TransmitSlotTimer;
-		interface Timer<T32khz> as PrepareSlotTimer;
 	}
 } implementation {
+#ifdef DEBUG
+#define DEBUG_NOW
+#endif
 
 	//Defined at compile time
 	uint32_t epochDuration = slotDuration * ((uint16_t) maxSlotId + 1);
@@ -60,7 +62,6 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 	command error_t SlotScheduler.stop() {
 		bool wasStarted = isStarted;
 		call TransmitSlotTimer.stop();
-		call PrepareSlotTimer.stop();
 		call EpochTimer.stop();
 		isStarted = FALSE;
 		return (wasStarted) ? EALREADY : SUCCESS;
@@ -109,31 +110,5 @@ generic module SlotSchedulerP(uint32_t slotDuration, uint8_t maxSlotId) {
 			transmitSlot = nextSlot;
 			call TransmitSlotTimer.startOneShotAt(epoch_reference_time + epochDuration, slotDuration * transmitSlot);
 		}
-	}
-
-
-	event void PrepareSlotTimer.fired(){
-		if(!isPrepareSlotActive) {
-			isPrepareSlotActive = TRUE;
-			#ifdef DEBUG_NOW
-			printf("[DEBUG] Prepare slot timer activated...\n");
-			printfflush();
-			#endif
-			call PrepareSlotTimer.startOneShot(slotDuration);
-			signal SlotScheduler.preparingSlotStarted(transmitSlot);
-			return;
-		}
-
-		isPrepareSlotActive = FALSE;
-
-		signal SlotScheduler.preparingSlotEnded(prepareSlot);
-		
-		// Absolutely next epoch! Data timer only trigger once per round		
-		call PrepareSlotTimer.startOneShotAt(epoch_reference_time + epochDuration, slotDuration * prepareSlot);
-	}
-
-	command void SlotScheduler.startPreparingSlot(uint8_t slotId){
-		prepareSlot = slotId;
-		call PrepareSlotTimer.startOneShotAt(epoch_reference_time, slotDuration * prepareSlot);
 	}
 }
