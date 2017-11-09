@@ -63,7 +63,7 @@ implementation{
 #ifdef DEBUG
 #define DEBUG_NOW
 // #define DEBUG_DATA
-// #define DEBUG_DEBUG
+#define DEBUG_DEBUG
 // #define DEBUG_1
 #endif
 #pragma mark - Global var
