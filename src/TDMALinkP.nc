@@ -74,7 +74,7 @@ implementation{
 	uint8_t assigned_slot = 0;
 	bool has_joined = FALSE;
 	uint8_t missed_sync_count = 0;
-	am_addr_t allocated_slots[MAX_SENSORS];
+	am_addr_t allocated_slots[MAX_SLAVES];
 	uint8_t next_free_slot_pos = 0;
 	bool data_ready = FALSE;
 	
@@ -519,20 +519,30 @@ implementation{
 		#endif
 		call JoinReqSend.send(head_addr, &join_req_packet, sizeof(JoinReqMsg));
 	}
-
+	
+	bool printed_data = FALSE;
 	command void TDMAProtocol.debug() {
 		// TODO make debug return more specific data
+		int max_s = 0;
 		int i = 0;
+		if(printed_data) {
+			max_s = MAX_SLAVES;
+			i = (MAX_SLAVES / 2);
+		} else {
+			max_s = MAX_SLAVES / 2;
+			i = 0;
+		}
 		#ifdef DEBUG_DEBUG
 		printf("[INFO] Assigned Slot: %d\n", assigned_slot);
 		if(TOS_NODE_ID == 0x0000) {
 			printf("========================\n");
 			printf("[INFO] Slots table:\n");
-			for(i = 0; i < MAX_SENSORS; i++) {
+			for(; i < max_s; i++) {
 				printf("[INFO] Slot %d: 0x%04x\n", i, allocated_slots[i]);
 			}
 			printf("========================\n");
 		}
+		printed_data = !printed_data;
 		printfflush();
 		#endif
 	}

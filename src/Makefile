@@ -13,7 +13,7 @@ CFLAGS += -DNEW_PRINTF_SEMANTICS
 #Define the duration of a single time slot (in milliseconds)
 CFLAGS += -DSLOT_DURATION=2000
 #Define the amount of available data slots (up to 254)
-CFLAGS += -DMAX_SLAVES=10
+CFLAGS += -DMAX_SLAVES=14
 #Uncomment to enable debug messages
 CFLAGS += -DDEBUG
 
