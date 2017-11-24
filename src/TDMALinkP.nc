@@ -17,6 +17,10 @@
 #define MAX_SLAVES		5	// Num of slaves
 #endif
 
+#ifdef MAX_SLAVES
+#define SPLIT_DEBUG_SLOT_TABLE	MAX_SLAVES / 5
+#endif
+
 #define HEAD_ADDR	0x0000
 #define SYNC_SLOT	0
 #define JOIN_SLOT	1
@@ -184,6 +188,7 @@ implementation{
 			printf("/*------ NEW ROUND ------*/\n");
 			printfflush();
 		#endif
+			call TDMAProtocol.debug();
 			signal TDMAProtocol.preparePacket();
 		}
 		#ifdef DEBUG_1
@@ -232,6 +237,10 @@ implementation{
 			//Go to resync mode
 			if(missed_sync_count >= RESYNC_THRESHOLD) {
 				sync_mode = TRUE;
+				has_joined = FALSE;
+				is_started = FALSE;
+				sync_received = FALSE;
+				assigned_slot = 0;
 				return SYNC_SLOT;
 			}
 		}
@@ -317,7 +326,6 @@ implementation{
 	}
 	
 	event void TSSend.sendDone(message_t *msg, error_t error){
-		call TDMAProtocol.debug();
 		#ifdef DEBUG_1
 		printf("[DEBUG] Time sync packet sent!\n");
 		printfflush();
@@ -520,29 +528,31 @@ implementation{
 		call JoinReqSend.send(head_addr, &join_req_packet, sizeof(JoinReqMsg));
 	}
 	
-	bool printed_data = FALSE;
+	#ifdef DEBUG_DEBUG
+	uint8_t round = 0;
+	#endif
 	command void TDMAProtocol.debug() {
 		// TODO make debug return more specific data
-		int max_s = 0;
-		int i = 0;
-		if(printed_data) {
-			max_s = MAX_SLAVES;
-			i = (MAX_SLAVES / 2);
-		} else {
-			max_s = MAX_SLAVES / 2;
-			i = 0;
-		}
 		#ifdef DEBUG_DEBUG
+		uint8_t max_slot = 0;
+		uint8_t i = 0;
 		printf("[INFO] Assigned Slot: %d\n", assigned_slot);
+		printf("[INFO] Missed TimeSync: %d\n", missed_sync_count);
 		if(TOS_NODE_ID == 0x0000) {
+			i = round * 5;
+			max_slot = (round + 1) * 5; 
 			printf("========================\n");
 			printf("[INFO] Slots table:\n");
-			for(; i < max_s; i++) {
+			for(; i < max_slot; i++) {
+				if(i >= MAX_SLAVES)
+					break;
 				printf("[INFO] Slot %d: 0x%04x\n", i, allocated_slots[i]);
 			}
 			printf("========================\n");
 		}
-		printed_data = !printed_data;
+		round = round + 1;
+		if(round > SPLIT_DEBUG_SLOT_TABLE)
+			round = 0;
 		printfflush();
 		#endif
 	}
