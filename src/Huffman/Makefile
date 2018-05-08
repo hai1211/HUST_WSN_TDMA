@@ -1,0 +1,2 @@
+COMPONENT = runC
+include $(MAKERULES)
